@@ -88,7 +88,15 @@ def processar_pdf(pdf_path):
     print("\n📊 Resumo:")
     print(df["Tipo"].value_counts())
 
-    output = pdf_path.replace(".pdf", "_instrumentos.xlsx")
+    import os
+
+    os.makedirs("temp", exist_ok=True)
+
+    output = os.path.join(
+        "temp",
+        os.path.basename(pdf_path).replace(".pdf", "_instrumentos.xlsx")
+    )
+
     df.to_excel(output, index=False)
 
     print(f"\n✅ Gerado: {output}")
