@@ -27,4 +27,11 @@ async def upload(file: UploadFile = File(...)):
     if not caminho_excel:
         return {"erro": "Nenhum instrumento encontrado"}
 
-    return FileResponse(caminho_excel, filename="resultado.xlsx")
+    from fastapi.responses import FileResponse
+import os
+
+return FileResponse(
+    path=caminho_excel,
+    filename="resultado.xlsx",
+    media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+)
