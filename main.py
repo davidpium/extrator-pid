@@ -1,5 +1,8 @@
-import uvicorn
 import os
+
+os.system("pip install openpyxl")
+
+import uvicorn
 
 port = int(os.environ.get("PORT", 8000))
 
