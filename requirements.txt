@@ -3,3 +3,4 @@ uvicorn
 pymupdf
 pandas
 scikit-learn
+python-multipart
