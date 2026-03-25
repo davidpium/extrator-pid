@@ -1,9 +1,7 @@
 fastapi
 uvicorn
+python-multipart
 pymupdf
 pandas
 scikit-learn
-python-multipart
-openpyxl
-
-#force
+openpyxl==3.1.2
