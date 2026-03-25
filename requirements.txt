@@ -4,3 +4,4 @@ pymupdf
 pandas
 scikit-learn
 python-multipart
+openpyxl
