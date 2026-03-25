@@ -98,7 +98,7 @@ def processar_pdf(pdf_path):
     )
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-    df.to_excel(writer, index=False)
+        df.to_excel(writer, index=False)
 
     print(f"\n✅ Gerado: {output}")
 
