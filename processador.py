@@ -2,24 +2,6 @@ import fitz  # PyMuPDF
 import pandas as pd
 import re
 import os
-import numpy as np
-from sklearn.cluster import DBSCAN
-
-
-# =========================
-# 🔹 NORMALIZAÇÃO
-# =========================
-def limpar_texto(texto):
-    texto = texto.upper()
-    texto = re.sub(r'[^A-Z0-9\-]', '', texto)
-    return texto
-
-
-# =========================
-# 🔹 DETECTA TAG SIMPLES
-# =========================
-def extrair_tag(texto):
-    return re.findall(r'[A-Z]{1,4}-?\d{1,4}', texto)
 
 
 # =========================
@@ -36,77 +18,35 @@ def eh_instrumento(tag):
 
 
 # =========================
-# 🔹 RECONSTRUÇÃO POR PROXIMIDADE
+# 🔹 EXTRAÇÃO PRINCIPAL (SIMPLES E ESTÁVEL)
 # =========================
-def reconstruir_tags(palavras):
-
-    candidatos = []
-
-    for i, w1 in enumerate(palavras):
-
-        t1 = limpar_texto(w1[4])
-
-        if not t1:
-            continue
-
-        # 🔹 sozinho
-        for tag in extrair_tag(t1):
-            candidatos.append({
-                "tag": tag,
-                "x": w1[0],
-                "y": w1[1]
-            })
-
-        # 🔹 combina com próximas palavras (janela)
-        for j in range(1, 3):  # olha até 2 palavras à frente
-            if i + j >= len(palavras):
-                continue
-
-            w2 = palavras[i + j]
-
-            # distância espacial
-            dx = abs(w1[0] - w2[0])
-            dy = abs(w1[1] - w2[1])
-
-            # só combina se estiver próximo
-            if dx < 50 and dy < 10:
-
-                t2 = limpar_texto(w2[4])
-
-                combinado = t1 + t2
-
-                for tag in extrair_tag(combinado):
-                    candidatos.append({
-                        "tag": tag,
-                        "x": w1[0],
-                        "y": w1[1]
-                    })
-
-    return candidatos
+def extrair_tags_basico(texto):
+    return re.findall(r'[A-Z]{1,4}-?\d{1,4}', texto)
 
 
 # =========================
-# 🔹 CLUSTER SUAVE
+# 🔹 RECUPERAÇÃO INTELIGENTE (AQUI ESTÁ O GANHO)
 # =========================
-def clusterizar(pontos):
+def recuperar_tags(texto_total):
 
-    if not pontos:
-        return []
+    texto = texto_total.upper()
 
-    coords = np.array([[p["x"], p["y"]] for p in pontos])
+    # remove sujeira leve
+    texto = re.sub(r'[^A-Z0-9\- ]', ' ', texto)
 
-    clustering = DBSCAN(eps=12, min_samples=1).fit(coords)
-    labels = clustering.labels_
+    # corrige hífen quebrado
+    texto = texto.replace("- ", "-")
+    texto = texto.replace(" -", "-")
 
-    resultado = []
-    usados = set()
+    # junta TI 101 → TI101
+    texto = re.sub(r'([A-Z]{2,4})\s+(\d{2,4})', r'\1\2', texto)
 
-    for i, label in enumerate(labels):
-        if label not in usados:
-            resultado.append(pontos[i])
-            usados.add(label)
+    # remove espaços duplicados
+    texto = re.sub(r'\s+', ' ', texto)
 
-    return resultado
+    tags = re.findall(r'[A-Z]{1,4}-?\d{1,4}', texto)
+
+    return tags
 
 
 # =========================
@@ -122,27 +62,28 @@ def processar_pdf(pdf_path):
     for pagina_num, pagina in enumerate(doc):
         print(f"\n📄 Página {pagina_num + 1}")
 
-        palavras = pagina.get_text("words")
+        texto = pagina.get_text()
 
-        # 🔥 reconstrução inteligente
-        candidatos = reconstruir_tags(palavras)
+        # 🔹 EXTRAÇÃO BASE (já funciona bem)
+        tags_base = extrair_tags_basico(texto)
 
-        print(f"Candidatos brutos: {len(candidatos)}")
+        # 🔹 RECUPERAÇÃO (corrige os que faltam)
+        tags_extra = recuperar_tags(texto)
 
-        # 🔹 filtra instrumentos
-        candidatos = [c for c in candidatos if eh_instrumento(c["tag"])]
+        # 🔹 JUNTA TUDO
+        todas_tags = tags_base + tags_extra
 
-        # 🔹 cluster
-        candidatos = clusterizar(candidatos)
+        print(f"Total bruto encontrado: {len(todas_tags)}")
 
-        print(f"Após cluster: {len(candidatos)}")
+        # 🔹 FILTRA
+        for tag in todas_tags:
+            if eh_instrumento(tag):
+                tipo = re.match(r'[A-Z]+', tag).group()
 
-        for c in candidatos:
-            tipo = re.match(r'[A-Z]+', c["tag"]).group()
-            resultados.append({
-                "Tipo": tipo,
-                "Tag": c["tag"]
-            })
+                resultados.append({
+                    "Tipo": tipo,
+                    "Tag": tag
+                })
 
     if not resultados:
         print("❌ Nenhum instrumento encontrado")
@@ -150,7 +91,9 @@ def processar_pdf(pdf_path):
 
     df = pd.DataFrame(resultados)
 
+    # 🔹 remove duplicados
     df = df.drop_duplicates()
+
     df = df.sort_values(by=["Tipo", "Tag"])
 
     print("\n📊 Resumo:")
@@ -163,6 +106,7 @@ def processar_pdf(pdf_path):
         os.path.basename(pdf_path).replace(".pdf", "_instrumentos.xlsx")
     )
 
+    # 🔹 escrita segura
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False)
 
