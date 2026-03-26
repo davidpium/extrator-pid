@@ -2,8 +2,8 @@ import fitz  # PyMuPDF
 import pandas as pd
 import re
 import os
-from sklearn.cluster import DBSCAN
 import numpy as np
+from sklearn.cluster import DBSCAN
 
 
 # =========================
@@ -11,73 +11,91 @@ import numpy as np
 # =========================
 def limpar_texto(texto):
     texto = texto.upper()
-    texto = re.sub(r'[^A-Z0-9\-]', ' ', texto)
-    texto = re.sub(r'\s+', ' ', texto)
+    texto = re.sub(r'[^A-Z0-9\-]', '', texto)
     return texto
 
 
 # =========================
-# 🔹 DETECÇÃO HÍBRIDA
+# 🔹 DETECTA TAG SIMPLES
 # =========================
-def extrair_tags_inteligente(texto):
-
-    # 🔒 modo preciso (preserva PDF bom)
-    padrao_estrito = r'\b[A-Z]{2,3}-\d{2,4}\b'
-    estritos = re.findall(padrao_estrito, texto)
-
-    # 🔓 modo flexível (salva PDFs ruins)
-    padrao_flex = r'\b[A-Z]{1,4}-?\d{1,4}\b'
-    flex = re.findall(padrao_flex, texto)
-
-    # 🎯 decisão inteligente
-    if len(estritos) >= 10:
-        return estritos
-    else:
-        return flex
+def extrair_tag(texto):
+    return re.findall(r'[A-Z]{1,4}-?\d{1,4}', texto)
 
 
 # =========================
-# 🔹 FILTRO INTELIGENTE
+# 🔹 FILTRO ISA
 # =========================
 def eh_instrumento(tag):
-
-    prefixos_fortes = [
+    prefixos = [
         "TI","PI","FI","LI",
-        "PT","TT","FT","LT"
-    ]
-
-    prefixos_medios = [
+        "PT","TT","FT","LT",
         "FC","LC","HC","HS","LS",
         "PC","TC"
     ]
-
-    if any(tag.startswith(p) for p in prefixos_fortes):
-        return True
-
-    if any(tag.startswith(p) for p in prefixos_medios):
-        return len(tag) >= 4
-
-    return False
-
-
-def filtro_final(tag):
-    return (
-        any(c.isdigit() for c in tag) and
-        2 <= len(tag) <= 10
-    )
+    return any(tag.startswith(p) for p in prefixos)
 
 
 # =========================
-# 🔹 CLUSTER (SUAVE)
+# 🔹 RECONSTRUÇÃO POR PROXIMIDADE
 # =========================
-def clusterizar(palavras):
+def reconstruir_tags(palavras):
 
-    if len(palavras) == 0:
+    candidatos = []
+
+    for i, w1 in enumerate(palavras):
+
+        t1 = limpar_texto(w1[4])
+
+        if not t1:
+            continue
+
+        # 🔹 sozinho
+        for tag in extrair_tag(t1):
+            candidatos.append({
+                "tag": tag,
+                "x": w1[0],
+                "y": w1[1]
+            })
+
+        # 🔹 combina com próximas palavras (janela)
+        for j in range(1, 3):  # olha até 2 palavras à frente
+            if i + j >= len(palavras):
+                continue
+
+            w2 = palavras[i + j]
+
+            # distância espacial
+            dx = abs(w1[0] - w2[0])
+            dy = abs(w1[1] - w2[1])
+
+            # só combina se estiver próximo
+            if dx < 50 and dy < 10:
+
+                t2 = limpar_texto(w2[4])
+
+                combinado = t1 + t2
+
+                for tag in extrair_tag(combinado):
+                    candidatos.append({
+                        "tag": tag,
+                        "x": w1[0],
+                        "y": w1[1]
+                    })
+
+    return candidatos
+
+
+# =========================
+# 🔹 CLUSTER SUAVE
+# =========================
+def clusterizar(pontos):
+
+    if not pontos:
         return []
 
-    coords = np.array([[p["x"], p["y"]] for p in palavras])
+    coords = np.array([[p["x"], p["y"]] for p in pontos])
 
-    clustering = DBSCAN(eps=10, min_samples=1).fit(coords)
+    clustering = DBSCAN(eps=12, min_samples=1).fit(coords)
     labels = clustering.labels_
 
     resultado = []
@@ -85,7 +103,7 @@ def clusterizar(palavras):
 
     for i, label in enumerate(labels):
         if label not in usados:
-            resultado.append(palavras[i])
+            resultado.append(pontos[i])
             usados.add(label)
 
     return resultado
@@ -106,28 +124,20 @@ def processar_pdf(pdf_path):
 
         palavras = pagina.get_text("words")
 
-        candidatos = []
-
-        for w in palavras:
-            texto = limpar_texto(w[4])
-
-            tags = extrair_tags_inteligente(texto)
-
-            for tag in tags:
-                if eh_instrumento(tag) and filtro_final(tag):
-                    candidatos.append({
-                        "tag": tag,
-                        "x": w[0],
-                        "y": w[1]
-                    })
+        # 🔥 reconstrução inteligente
+        candidatos = reconstruir_tags(palavras)
 
         print(f"Candidatos brutos: {len(candidatos)}")
 
-        candidatos_cluster = clusterizar(candidatos)
+        # 🔹 filtra instrumentos
+        candidatos = [c for c in candidatos if eh_instrumento(c["tag"])]
 
-        print(f"Após cluster: {len(candidatos_cluster)}")
+        # 🔹 cluster
+        candidatos = clusterizar(candidatos)
 
-        for c in candidatos_cluster:
+        print(f"Após cluster: {len(candidatos)}")
+
+        for c in candidatos:
             tipo = re.match(r'[A-Z]+', c["tag"]).group()
             resultados.append({
                 "Tipo": tipo,
@@ -153,7 +163,6 @@ def processar_pdf(pdf_path):
         os.path.basename(pdf_path).replace(".pdf", "_instrumentos.xlsx")
     )
 
-    # escrita segura
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False)
 
