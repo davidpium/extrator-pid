@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import numpy as np
 from sklearn.cluster import DBSCAN
+import os
 
 EPS = 60
 MIN_SAMPLES = 2
@@ -21,19 +22,57 @@ def processar_pdf(pdf_path):
 
         tokens = []
         for w in words:
-            texto = w[4].upper()
+            texto = re.sub(r'[^A-Z0-9\-]', '', w[4].upper())
             tokens.append((texto, w[0], w[1]))
 
         candidatos = []
 
-        # 🔥 reconstruir pares
+        # =========================
+        # 🔹 1. SEU MÉTODO ORIGINAL (mantido)
+        # =========================
         for i in range(len(tokens) - 1):
             t1, x1, y1 = tokens[i]
             t2, x2, y2 = tokens[i + 1]
 
             if re.match(r'^[A-Z]{1,3}$', t1) and re.match(r'^\d{3,4}$', t2):
-                tipo = t1
-                tag = t2
+                if re.match(r'^[TPFALH][A-Z]?$', t1):
+                    candidatos.append({
+                        "Tipo": t1,
+                        "Tag": t2,
+                        "x": x1,
+                        "y": y1,
+                        "Pagina": page_num + 1
+                    })
+
+        # =========================
+        # 🔹 2. NOVO: detectar TI101 direto
+        # =========================
+        for t, x, y in tokens:
+            match = re.match(r'^([A-Z]{1,3})-?(\d{3,4})$', t)
+            if match:
+                tipo, tag = match.groups()
+
+                if re.match(r'^[TPFALH][A-Z]?$', tipo):
+                    candidatos.append({
+                        "Tipo": tipo,
+                        "Tag": tag,
+                        "x": x,
+                        "y": y,
+                        "Pagina": page_num + 1
+                    })
+
+        # =========================
+        # 🔹 3. NOVO: juntar tokens próximos (TI + -101)
+        # =========================
+        for i in range(len(tokens) - 1):
+            t1, x1, y1 = tokens[i]
+            t2, x2, y2 = tokens[i + 1]
+
+            combinado = t1 + t2
+
+            match = re.match(r'^([A-Z]{1,3})-?(\d{3,4})$', combinado)
+            if match:
+                tipo, tag = match.groups()
 
                 if re.match(r'^[TPFALH][A-Z]?$', tipo):
                     candidatos.append({
@@ -50,7 +89,7 @@ def processar_pdf(pdf_path):
             continue
 
         # =========================
-        # CLUSTER
+        # CLUSTER (mantido)
         # =========================
         coords = np.array([[c["x"], c["y"]] for c in candidatos])
 
@@ -87,8 +126,6 @@ def processar_pdf(pdf_path):
 
     print("\n📊 Resumo:")
     print(df["Tipo"].value_counts())
-
-    import os
 
     os.makedirs("temp", exist_ok=True)
 
