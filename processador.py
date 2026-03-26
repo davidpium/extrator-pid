@@ -1,103 +1,94 @@
-import fitz  # PyMuPDF
+import fitz
 import pandas as pd
 import re
-import os
+import numpy as np
+from sklearn.cluster import DBSCAN
+
+EPS = 60
+MIN_SAMPLES = 2
 
 
-# =========================
-# 🔹 FILTRO ISA
-# =========================
-def eh_instrumento(tag):
-    prefixos = [
-        "TI","PI","FI","LI",
-        "PT","TT","FT","LT",
-        "FC","LC","HC","HS","LS",
-        "PC","TC"
-    ]
-    return any(tag.startswith(p) for p in prefixos)
-
-
-# =========================
-# 🔹 EXTRAÇÃO PRINCIPAL (SIMPLES E ESTÁVEL)
-# =========================
-def extrair_tags_basico(texto):
-    return re.findall(r'[A-Z]{1,4}-?\d{1,4}', texto)
-
-
-# =========================
-# 🔹 RECUPERAÇÃO INTELIGENTE (AQUI ESTÁ O GANHO)
-# =========================
-def recuperar_tags(texto_total):
-
-    texto = texto_total.upper()
-
-    # remove sujeira leve
-    texto = re.sub(r'[^A-Z0-9\- ]', ' ', texto)
-
-    # corrige hífen quebrado
-    texto = texto.replace("- ", "-")
-    texto = texto.replace(" -", "-")
-
-    # junta TI 101 → TI101
-    texto = re.sub(r'([A-Z]{2,4})\s+(\d{2,4})', r'\1\2', texto)
-
-    # remove espaços duplicados
-    texto = re.sub(r'\s+', ' ', texto)
-
-    tags = re.findall(r'[A-Z]{1,4}-?\d{1,4}', texto)
-
-    return tags
-
-
-# =========================
-# 🔹 PROCESSAMENTO PRINCIPAL
-# =========================
 def processar_pdf(pdf_path):
-
     print(f"\n📂 Processando: {pdf_path}")
 
     doc = fitz.open(pdf_path)
-    resultados = []
+    instrumentos = []
 
-    for pagina_num, pagina in enumerate(doc):
-        print(f"\n📄 Página {pagina_num + 1}")
+    for page_num, page in enumerate(doc):
+        print(f"\n📄 Página {page_num+1}")
 
-        texto = pagina.get_text()
+        words = page.get_text("words")
 
-        # 🔹 EXTRAÇÃO BASE (já funciona bem)
-        tags_base = extrair_tags_basico(texto)
+        tokens = []
+        for w in words:
+            texto = w[4].upper()
+            tokens.append((texto, w[0], w[1]))
 
-        # 🔹 RECUPERAÇÃO (corrige os que faltam)
-        tags_extra = recuperar_tags(texto)
+        candidatos = []
 
-        # 🔹 JUNTA TUDO
-        todas_tags = tags_base + tags_extra
+        # 🔥 reconstruir pares
+        for i in range(len(tokens) - 1):
+            t1, x1, y1 = tokens[i]
+            t2, x2, y2 = tokens[i + 1]
 
-        print(f"Total bruto encontrado: {len(todas_tags)}")
+            if re.match(r'^[A-Z]{1,3}$', t1) and re.match(r'^\d{3,4}$', t2):
+                tipo = t1
+                tag = t2
 
-        # 🔹 FILTRA
-        for tag in todas_tags:
-            if eh_instrumento(tag):
-                tipo = re.match(r'[A-Z]+', tag).group()
+                if re.match(r'^[TPFALH][A-Z]?$', tipo):
+                    candidatos.append({
+                        "Tipo": tipo,
+                        "Tag": tag,
+                        "x": x1,
+                        "y": y1,
+                        "Pagina": page_num + 1
+                    })
 
-                resultados.append({
-                    "Tipo": tipo,
-                    "Tag": tag
-                })
+        print(f"Candidatos brutos: {len(candidatos)}")
 
-    if not resultados:
+        if not candidatos:
+            continue
+
+        # =========================
+        # CLUSTER
+        # =========================
+        coords = np.array([[c["x"], c["y"]] for c in candidatos])
+
+        clustering = DBSCAN(eps=EPS, min_samples=MIN_SAMPLES).fit(coords)
+        labels = clustering.labels_
+
+        clusters_validos = []
+
+        for label in set(labels):
+            grupo = [candidatos[i] for i in range(len(labels)) if labels[i] == label]
+
+            if label == -1:
+                for g in grupo:
+                    if re.match(r'^[TPFALH][A-Z]?$', g["Tipo"]):
+                        clusters_validos.append(g)
+                continue
+
+            if len(grupo) >= MIN_SAMPLES:
+                clusters_validos.extend(grupo)
+
+        print(f"Após cluster: {len(clusters_validos)}")
+
+        instrumentos.extend(clusters_validos)
+
+    if not instrumentos:
         print("❌ Nenhum instrumento encontrado")
         return None
 
-    df = pd.DataFrame(resultados)
+    df = pd.DataFrame(instrumentos)
 
-    # 🔹 remove duplicados
-    df = df.drop_duplicates()
-
+    df["Instrumento"] = df["Tipo"] + df["Tag"]
+    df = df.drop_duplicates(subset=["Instrumento"])
     df = df.sort_values(by=["Tipo", "Tag"])
 
     print("\n📊 Resumo:")
     print(df["Tipo"].value_counts())
+
+    import os
 
     os.makedirs("temp", exist_ok=True)
 
@@ -106,7 +97,6 @@ def processar_pdf(pdf_path):
         os.path.basename(pdf_path).replace(".pdf", "_instrumentos.xlsx")
     )
 
-    # 🔹 escrita segura
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False)
 
