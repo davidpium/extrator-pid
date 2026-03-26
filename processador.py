@@ -8,6 +8,14 @@ import os
 EPS = 60
 MIN_SAMPLES = 2
 
+# 🔥 whitelist real (remove FV e falsos)
+TIPOS_VALIDOS = [
+    "TI","PI","FI","LI",
+    "PT","TT","FT","LT",
+    "FC","LC","HC","HS","LS",
+    "PC","TC"
+]
+
 
 def processar_pdf(pdf_path):
     print(f"\n📂 Processando: {pdf_path}")
@@ -28,14 +36,14 @@ def processar_pdf(pdf_path):
         candidatos = []
 
         # =========================
-        # 🔹 1. SEU MÉTODO ORIGINAL (mantido)
+        # 🔹 1. ORIGINAL (mantido)
         # =========================
         for i in range(len(tokens) - 1):
             t1, x1, y1 = tokens[i]
             t2, x2, y2 = tokens[i + 1]
 
             if re.match(r'^[A-Z]{1,3}$', t1) and re.match(r'^\d{3,4}$', t2):
-                if re.match(r'^[TPFALH][A-Z]?$', t1):
+                if t1 in TIPOS_VALIDOS:
                     candidatos.append({
                         "Tipo": t1,
                         "Tag": t2,
@@ -45,14 +53,14 @@ def processar_pdf(pdf_path):
                     })
 
         # =========================
-        # 🔹 2. NOVO: detectar TI101 direto
+        # 🔹 2. TAG DIRETA (TI101 / TI-101)
         # =========================
         for t, x, y in tokens:
             match = re.match(r'^([A-Z]{1,3})-?(\d{3,4})$', t)
             if match:
                 tipo, tag = match.groups()
 
-                if re.match(r'^[TPFALH][A-Z]?$', tipo):
+                if tipo in TIPOS_VALIDOS:
                     candidatos.append({
                         "Tipo": tipo,
                         "Tag": tag,
@@ -62,7 +70,7 @@ def processar_pdf(pdf_path):
                     })
 
         # =========================
-        # 🔹 3. NOVO: juntar tokens próximos (TI + -101)
+        # 🔹 3. 2 TOKENS COMBINADOS
         # =========================
         for i in range(len(tokens) - 1):
             t1, x1, y1 = tokens[i]
@@ -74,7 +82,30 @@ def processar_pdf(pdf_path):
             if match:
                 tipo, tag = match.groups()
 
-                if re.match(r'^[TPFALH][A-Z]?$', tipo):
+                if tipo in TIPOS_VALIDOS:
+                    candidatos.append({
+                        "Tipo": tipo,
+                        "Tag": tag,
+                        "x": x1,
+                        "y": y1,
+                        "Pagina": page_num + 1
+                    })
+
+        # =========================
+        # 🔥 4. 3 TOKENS (resolve os faltantes)
+        # =========================
+        for i in range(len(tokens) - 2):
+            t1, x1, y1 = tokens[i]
+            t2, x2, y2 = tokens[i + 1]
+            t3, x3, y3 = tokens[i + 2]
+
+            combinado = t1 + t2 + t3
+
+            match = re.match(r'^([A-Z]{1,3})-?(\d{3,4})$', combinado)
+            if match:
+                tipo, tag = match.groups()
+
+                if tipo in TIPOS_VALIDOS:
                     candidatos.append({
                         "Tipo": tipo,
                         "Tag": tag,
@@ -102,9 +133,7 @@ def processar_pdf(pdf_path):
             grupo = [candidatos[i] for i in range(len(labels)) if labels[i] == label]
 
             if label == -1:
-                for g in grupo:
-                    if re.match(r'^[TPFALH][A-Z]?$', g["Tipo"]):
-                        clusters_validos.append(g)
+                clusters_validos.extend(grupo)
                 continue
 
             if len(grupo) >= MIN_SAMPLES:
