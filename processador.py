@@ -35,7 +35,7 @@ def processar_pdf(pdf_path):
                 tipo = t1
                 tag = t2
 
-                if re.match(r'^[TPFALH][A-Z]?$', tipo):
+                if if re.match(r'^[A-Z]{1,3}$', tipo)::
                     candidatos.append({
                         "Tipo": tipo,
                         "Tag": tag,
@@ -64,7 +64,7 @@ def processar_pdf(pdf_path):
 
             if label == -1:
                 for g in grupo:
-                    if re.match(r'^[TPFALH][A-Z]?$', g["Tipo"]):
+                    if re.match(r'^[TPFALH][A-Z]?$', g["Tipo"):
                         clusters_validos.append(g)
                 continue
 
