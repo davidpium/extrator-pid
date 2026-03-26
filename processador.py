@@ -17,24 +17,47 @@ def limpar_texto(texto):
 
 
 # =========================
-# 🔹 DETECÇÃO FLEXÍVEL DE TAG
+# 🔹 DETECÇÃO HÍBRIDA
 # =========================
-def extrair_candidatos(texto):
-    padrao = r'\b[A-Z]{1,4}-?\d{1,4}\b'
-    return re.findall(padrao, texto)
+def extrair_tags_inteligente(texto):
+
+    # 🔒 modo preciso (preserva PDF bom)
+    padrao_estrito = r'\b[A-Z]{2,3}-\d{2,4}\b'
+    estritos = re.findall(padrao_estrito, texto)
+
+    # 🔓 modo flexível (salva PDFs ruins)
+    padrao_flex = r'\b[A-Z]{1,4}-?\d{1,4}\b'
+    flex = re.findall(padrao_flex, texto)
+
+    # 🎯 decisão inteligente
+    if len(estritos) >= 10:
+        return estritos
+    else:
+        return flex
 
 
 # =========================
-# 🔹 FILTRO INTELIGENTE (ISA-like)
+# 🔹 FILTRO INTELIGENTE
 # =========================
 def eh_instrumento(tag):
-    prefixos = [
-        "TI","PI","FI","LI","AI","DI",
-        "PT","TT","FT","LT",
-        "FC","LC","HC","HS","LS",
-        "PC","TC","SC"
+
+    prefixos_fortes = [
+        "TI","PI","FI","LI",
+        "PT","TT","FT","LT"
     ]
-    return any(tag.startswith(p) for p in prefixos)
+
+    prefixos_medios = [
+        "FC","LC","HC","HS","LS",
+        "PC","TC"
+    ]
+
+    if any(tag.startswith(p) for p in prefixos_fortes):
+        return True
+
+    if any(tag.startswith(p) for p in prefixos_medios):
+        return len(tag) >= 4
+
+    return False
 
 
 def filtro_final(tag):
@@ -45,15 +68,16 @@ def filtro_final(tag):
 
 
 # =========================
-# 🔹 CLUSTER (REMOVE DUPLICADOS ESPACIAIS)
+# 🔹 CLUSTER (SUAVE)
 # =========================
 def clusterizar(palavras):
+
     if len(palavras) == 0:
         return []
 
     coords = np.array([[p["x"], p["y"]] for p in palavras])
 
-    clustering = DBSCAN(eps=20, min_samples=1).fit(coords)
+    clustering = DBSCAN(eps=10, min_samples=1).fit(coords)
     labels = clustering.labels_
 
     resultado = []
@@ -68,7 +92,7 @@ def clusterizar(palavras):
 
 
 # =========================
-# 🔹 EXTRAÇÃO PRINCIPAL
+# 🔹 PROCESSAMENTO PRINCIPAL
 # =========================
 def processar_pdf(pdf_path):
 
@@ -87,9 +111,9 @@ def processar_pdf(pdf_path):
         for w in palavras:
             texto = limpar_texto(w[4])
 
-            encontrados = extrair_candidatos(texto)
+            tags = extrair_tags_inteligente(texto)
 
-            for tag in encontrados:
+            for tag in tags:
                 if eh_instrumento(tag) and filtro_final(tag):
                     candidatos.append({
                         "tag": tag,
@@ -129,7 +153,7 @@ def processar_pdf(pdf_path):
         os.path.basename(pdf_path).replace(".pdf", "_instrumentos.xlsx")
     )
 
-    # Escrita segura (evita corrupção)
+    # escrita segura
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False)
 
